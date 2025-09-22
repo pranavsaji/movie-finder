@@ -16,10 +16,15 @@ def movie_card_markdown(m: Dict[str, Any]) -> str:
     overview = m.get("overview") or ""
     poster = m.get("poster_url")
     lines = []
+    
     if poster:
         lines.append(f'<img src="{poster}" alt="{title}" style="max-width:150px;border-radius:12px;box-shadow:0 8px 20px rgba(0,0,0,0.15);" />')
-    lines.append(f"<h3 style='margin:6px 0'>{title} ({year})</h3>")
-    lines.append(f"<div style='opacity:0.75'>\u2b50 {rating:.1f} / 10</div>")
+    
+    # --- FIX APPLIED HERE ---
+    # Added specific 'color' styles to each text element to override the theme.
+    lines.append(f"<h3 style='margin:6px 0; color:#111827;'>{title} ({year})</h3>")
+    lines.append(f"<div style='opacity:0.75; color:#374151;'>\u2b50 {rating:.1f} / 10</div>")
     if overview:
-        lines.append(f"<p style='margin-top:6px'>{overview}</p>")
+        lines.append(f"<p style='margin-top:6px; color:#4b5563; font-size:14px; line-height:1.5;'>{overview}</p>")
+        
     return "\n".join(lines)

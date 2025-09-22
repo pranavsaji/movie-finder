@@ -19,9 +19,7 @@ LANG_CHOICES = [
 # Module-level state for genre mapping to be populated on load
 _genre_name_to_id: Dict[str, int] = {}
 
-# --- Data Fetching and Processing Logic (Functions from before remain the same) ---
-# ... [init_genres, render_results, _decorate, do_search, do_discover] ...
-# (No changes needed in the helper functions themselves)
+# --- Data Fetching and Processing Logic ---
 async def init_genres(lang: str) -> List[Tuple[str, int]]:
     items = await tmdb.get_genres(lang)
     return sorted([(g["name"], g["id"]) for g in items], key=lambda x: x[0].lower())
@@ -29,6 +27,7 @@ async def init_genres(lang: str) -> List[Tuple[str, int]]:
 def render_results(items: List[Dict[str, Any]]) -> str:
     html_parts = ['<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:18px">']
     for m in items:
+        # The 'color' style has been removed from here. Styling is now handled by 'movie_card_markdown'.
         card = ['<div style="border:1px solid #e5e7eb;border-radius:14px;padding:14px;background:#fff">']
         card.append(movie_card_markdown(m))
         if m.get("youtube_key"):
@@ -93,17 +92,13 @@ async def do_discover(genre_ids: List[int], lang: str, page: int, page_size: int
     enriched = [await _decorate(m) for m in batch]
     return f"Showing top {len(enriched)} of {total}+", enriched, total_pages, total
 
-
 # --- Top-Level Async Event Handlers ---
-# New function to populate genres when the app loads
 async def populate_genres_on_load(lang: str):
     global _genre_name_to_id
     genres_choices = await init_genres(lang)
     _genre_name_to_id = {name: gid for name, gid in genres_choices}
-    # Return an updated component to Gradio
     return gr.CheckboxGroup(choices=[name for name, _ in genres_choices], label="Select genre(s)")
 
-# ... [on_search, go_prev, go_next, etc., remain the same] ...
 async def on_search(q, l, p, ps):
     msg, enriched, tp, tr = await do_search(q, l, int(p), int(ps))
     return msg, render_results(enriched), tp, tr, q, enriched
@@ -136,13 +131,11 @@ async def go_next2(gnames, l, p, ps, tp):
     return p, msg, render_results(enriched), ntp, tr
 
 # --- UI Construction ---
-def build_app():  # No longer takes 'genres_choices' as an argument
+def build_app():
     with gr.Blocks(theme=gr.themes.Soft(), css=".gradio-container { max-width: 1200px !important; }") as demo:
         gr.Markdown("# 🎬 Movie Finder — Search, Preview & Watch")
         with gr.Tabs():
-            # Search Tab (no changes)
             with gr.Tab("🔎 Search"):
-                # ... same as before
                 with gr.Row():
                     query = gr.Textbox(label="Search movies", placeholder="e.g., Interstellar, Marvel, space adventure…")
                 with gr.Row():
@@ -159,11 +152,8 @@ def build_app():  # No longer takes 'genres_choices' as an argument
                 hidden_total_results = gr.State(0)
                 hidden_last_query = gr.State("")
                 hidden_last_list = gr.State([])
-
-            # Discover Tab (genres is now initialized empty)
             with gr.Tab("🎭 Browse by Genre"):
                 with gr.Row():
-                    # Initialized with an empty list. Will be populated by demo.load()
                     genres = gr.CheckboxGroup(choices=[], label="Select genre(s)")
                     lang2 = gr.Dropdown(LANG_CHOICES, value=DEFAULT_LANG, label="Metadata Language")
                 with gr.Row():
@@ -179,17 +169,17 @@ def build_app():  # No longer takes 'genres_choices' as an argument
                 hidden_total_results2 = gr.State(0)
                 hidden_last_genres = gr.State([])
 
-        # Wiring: Search tab (no changes)
+        # Wiring: Search tab
         search_btn.click(on_search, inputs=[query, lang, page, page_size], outputs=[stats, gallery, hidden_total_pages, hidden_total_results, hidden_last_query, hidden_last_list])
         prev_btn.click(go_prev, [hidden_last_query, lang, page, page_size], [page, stats, gallery, hidden_total_pages, hidden_total_results, hidden_last_list])
         next_btn.click(go_next, [hidden_last_query, lang, page, page_size, hidden_total_pages], [page, stats, gallery, hidden_total_pages, hidden_total_results, hidden_last_list])
 
-        # Wiring: Discover tab (no changes)
+        # Wiring: Discover tab
         discover_btn.click(on_discover, [genres, lang2, page2, page_size2], [stats2, gallery2, hidden_total_pages2, hidden_total_results2, hidden_last_genres])
         prev_btn2.click(go_prev2, [hidden_last_genres, lang2, page2, page_size2], [page2, stats2, gallery2, hidden_total_pages2, hidden_total_results2])
         next_btn2.click(go_next2, [hidden_last_genres, lang2, page2, page_size2, hidden_total_pages2], [page2, stats2, gallery2, hidden_total_pages2, hidden_total_results2])
-
-        # NEW: Lifecycle event to populate genres on startup
+        
+        # Lifecycle event to populate genres on startup
         demo.load(populate_genres_on_load, inputs=[lang2], outputs=[genres])
 
     return demo
