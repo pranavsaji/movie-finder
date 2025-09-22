@@ -46,7 +46,14 @@ async def search_movies(query: str, lang: str = "en", page: int = 1) -> Dict[str
         data = await _get(client, "/search/movie", _params({"query": query, "language": lang, "page": page, "include_adult": False}))
         return data
 
-async def discover_by_genres(genre_ids: List[int], lang: str = "en", page: int = 1, region: Optional[str]=None) -> Dict[str, Any]:
+# --- MODIFIED: Added 'original_language' parameter ---
+async def discover_by_genres(
+    genre_ids: List[int], 
+    lang: str = "en", 
+    page: int = 1, 
+    region: Optional[str]=None,
+    original_language: Optional[str]=None
+) -> Dict[str, Any]:
     params = {
         "with_genres": ",".join(map(str, genre_ids)) if genre_ids else None,
         "language": lang,
@@ -57,6 +64,10 @@ async def discover_by_genres(genre_ids: List[int], lang: str = "en", page: int =
     if region:
         params["region"] = region
         params["watch_region"] = region
+    # --- NEW: Add the original language filter if provided ---
+    if original_language:
+        params["with_original_language"] = original_language
+        
     # remove None
     params = {k: v for k, v in params.items() if v is not None}
     async with httpx.AsyncClient() as client:
@@ -88,7 +99,6 @@ def homepage(movie: Dict[str, Any]) -> Optional[str]:
     return movie.get("homepage") or None
 
 def providers(movie: Dict[str, Any], region: Optional[str]) -> List[Tuple[str, str]]:
-    # Uses TMDb watch/providers (not always populated). We still augment via web search.
     out = []
     prov = (movie.get("watch/providers") or {}).get("results") or {}
     if region and region in prov:
