@@ -6,23 +6,22 @@ import gradio as gr
 from services import tmdb, search
 from utils import movie_card_markdown
 
+# --- Environment and Global Configuration ---
 DEFAULT_LANG = os.getenv("DEFAULT_LANG", "en")
 REGION = os.getenv("REGION", "US")
 
 LANG_CHOICES = [
-    ("English", "en"),
-    ("Spanish", "es"),
-    ("French", "fr"),
-    ("German", "de"),
-    ("Hindi", "hi"),
-    ("Japanese", "ja"),
-    ("Korean", "ko"),
-    ("Chinese (ZH)", "zh"),
-    ("Malayalam", "ml"),
-    ("Tamil", "ta"),
-    ("Telugu", "te"),
+    ("English", "en"), ("Spanish", "es"), ("French", "fr"), ("German", "de"),
+    ("Hindi", "hi"), ("Japanese", "ja"), ("Korean", "ko"), ("Chinese (ZH)", "zh"),
+    ("Malayalam", "ml"), ("Tamil", "ta"), ("Telugu", "te"),
 ]
 
+# Module-level state for genre mapping to be populated on load
+_genre_name_to_id: Dict[str, int] = {}
+
+# --- Data Fetching and Processing Logic (Functions from before remain the same) ---
+# ... [init_genres, render_results, _decorate, do_search, do_discover] ...
+# (No changes needed in the helper functions themselves)
 async def init_genres(lang: str) -> List[Tuple[str, int]]:
     items = await tmdb.get_genres(lang)
     return sorted([(g["name"], g["id"]) for g in items], key=lambda x: x[0].lower())
@@ -36,12 +35,9 @@ def render_results(items: List[Dict[str, Any]]) -> str:
             card.append(
                 f"""
                 <div style="margin-top:10px;border-radius:12px;overflow:hidden">
-                  <iframe width="100%" height="180"
-                    src="https://www.youtube.com/embed/{m['youtube_key']}"
-                    title="YouTube trailer" frameborder="0"
-                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                    referrerpolicy="strict-origin-when-cross-origin"
-                    allowfullscreen></iframe>
+                  <iframe width="100%" height="180" src="https://www.youtube.com/embed/{m['youtube_key']}"
+                    title="YouTube trailer" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                    referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
                 </div>
                 """
             )
@@ -64,30 +60,19 @@ async def _decorate(movie: Dict[str, Any]) -> Dict[str, Any]:
 
     links = await search.google_watch_links(movie.get("title") or "", (movie.get("release_date") or "")[:4])
     result_links: List[Tuple[str, str]] = []
-    if imdb:
-        result_links.append(("IMDB", imdb))
-    if home:
-        result_links.append(("Official Site", home))
+    if imdb: result_links.append(("IMDB", imdb))
+    if home: result_links.append(("Official Site", home))
     result_links.extend(links)
 
     seen = set()
-    dedup = []
-    for name, url in result_links:
-        if url not in seen:
-            dedup.append((name, url))
-            seen.add(url)
+    dedup = [t for t in result_links if not (t[1] in seen or seen.add(t[1]))]
 
     return {
-        "id": movie["id"],
-        "title": movie.get("title"),
-        "overview": movie.get("overview"),
-        "release_date": movie.get("release_date"),
-        "vote_average": movie.get("vote_average"),
+        "id": movie["id"], "title": movie.get("title"), "overview": movie.get("overview"),
+        "release_date": movie.get("release_date"), "vote_average": movie.get("vote_average"),
         "poster_url": tmdb.poster_url(movie.get("poster_path"), "w342"),
         "backdrop_url": tmdb.backdrop_url(movie.get("backdrop_path"), "w780"),
-        "youtube_key": ykey,
-        "links": dedup,
-        "providers": provs
+        "youtube_key": ykey, "links": dedup, "providers": provs
     }
 
 async def do_search(query: str, lang: str, page: int, page_size: int):
@@ -108,18 +93,56 @@ async def do_discover(genre_ids: List[int], lang: str, page: int, page_size: int
     enriched = [await _decorate(m) for m in batch]
     return f"Showing top {len(enriched)} of {total}+", enriched, total_pages, total
 
-def build_app(genres_choices: List[Tuple[str, int]]):
-    with gr.Blocks(
-        theme=gr.themes.Soft(),
-        css=""" 
-        .gradio-container { max-width: 1200px !important; }
-        """
-    ) as demo:
-        gr.Markdown("# 🎬 Movie Finder — Search, Preview & Watch")
 
+# --- Top-Level Async Event Handlers ---
+# New function to populate genres when the app loads
+async def populate_genres_on_load(lang: str):
+    global _genre_name_to_id
+    genres_choices = await init_genres(lang)
+    _genre_name_to_id = {name: gid for name, gid in genres_choices}
+    # Return an updated component to Gradio
+    return gr.CheckboxGroup(choices=[name for name, _ in genres_choices], label="Select genre(s)")
+
+# ... [on_search, go_prev, go_next, etc., remain the same] ...
+async def on_search(q, l, p, ps):
+    msg, enriched, tp, tr = await do_search(q, l, int(p), int(ps))
+    return msg, render_results(enriched), tp, tr, q, enriched
+
+async def go_prev(q, l, p, ps):
+    p = max(1, int(p) - 1)
+    msg, enriched, tp, tr = await do_search(q, l, p, int(ps))
+    return p, msg, render_results(enriched), tp, tr, enriched
+
+async def go_next(q, l, p, ps, tp):
+    p = min(int(tp), int(p) + 1) if int(tp) > 0 else int(p) + 1
+    msg, enriched, ntp, tr = await do_search(q, l, p, int(ps))
+    return p, msg, render_results(enriched), ntp, tr, enriched
+
+async def on_discover(gnames, l, p, ps):
+    g_ids = [_genre_name_to_id.get(n) for n in (gnames or []) if _genre_name_to_id.get(n) is not None]
+    msg, enriched, tp, tr = await do_discover(g_ids, l, int(p), int(ps))
+    return msg, render_results(enriched), tp, tr, gnames
+
+async def go_prev2(gnames, l, p, ps):
+    p = max(1, int(p) - 1)
+    g_ids = [_genre_name_to_id.get(n) for n in (gnames or []) if _genre_name_to_id.get(n) is not None]
+    msg, enriched, tp, tr = await do_discover(g_ids, l, p, int(ps))
+    return p, msg, render_results(enriched), tp, tr
+
+async def go_next2(gnames, l, p, ps, tp):
+    p = min(int(tp), int(p) + 1) if int(tp) > 0 else int(p) + 1
+    g_ids = [_genre_name_to_id.get(n) for n in (gnames or []) if _genre_name_to_id.get(n) is not None]
+    msg, enriched, ntp, tr = await do_discover(g_ids, l, p, int(ps))
+    return p, msg, render_results(enriched), ntp, tr
+
+# --- UI Construction ---
+def build_app():  # No longer takes 'genres_choices' as an argument
+    with gr.Blocks(theme=gr.themes.Soft(), css=".gradio-container { max-width: 1200px !important; }") as demo:
+        gr.Markdown("# 🎬 Movie Finder — Search, Preview & Watch")
         with gr.Tabs():
-            # --- Search Tab
+            # Search Tab (no changes)
             with gr.Tab("🔎 Search"):
+                # ... same as before
                 with gr.Row():
                     query = gr.Textbox(label="Search movies", placeholder="e.g., Interstellar, Marvel, space adventure…")
                 with gr.Row():
@@ -129,8 +152,7 @@ def build_app(genres_choices: List[Tuple[str, int]]):
                     search_btn = gr.Button("Search", variant="primary")
                 stats = gr.Markdown("")
                 gallery = gr.HTML()
-                nav = gr.Row(visible=True)
-                with nav:
+                with gr.Row(visible=True) as nav:
                     prev_btn = gr.Button("◀ Prev")
                     next_btn = gr.Button("Next ▶")
                 hidden_total_pages = gr.State(0)
@@ -138,10 +160,11 @@ def build_app(genres_choices: List[Tuple[str, int]]):
                 hidden_last_query = gr.State("")
                 hidden_last_list = gr.State([])
 
-            # --- Discover Tab
+            # Discover Tab (genres is now initialized empty)
             with gr.Tab("🎭 Browse by Genre"):
                 with gr.Row():
-                    genres = gr.CheckboxGroup(choices=[g[0] for g in genres_choices], label="Select genre(s)")
+                    # Initialized with an empty list. Will be populated by demo.load()
+                    genres = gr.CheckboxGroup(choices=[], label="Select genre(s)")
                     lang2 = gr.Dropdown(LANG_CHOICES, value=DEFAULT_LANG, label="Metadata Language")
                 with gr.Row():
                     page_size2 = gr.Slider(label="Results per page", minimum=5, maximum=40, value=12, step=1)
@@ -149,61 +172,24 @@ def build_app(genres_choices: List[Tuple[str, int]]):
                     discover_btn = gr.Button("Show Movies", variant="primary")
                 stats2 = gr.Markdown("")
                 gallery2 = gr.HTML()
-                nav2 = gr.Row(visible=True)
-                with nav2:
+                with gr.Row(visible=True) as nav2:
                     prev_btn2 = gr.Button("◀ Prev")
                     next_btn2 = gr.Button("Next ▶")
                 hidden_total_pages2 = gr.State(0)
                 hidden_total_results2 = gr.State(0)
                 hidden_last_genres = gr.State([])
 
-        # ---------- Wiring: Search tab
-        async def on_search(q, l, p, ps):
-            msg, enriched, tp, tr = await do_search(q, l, int(p), int(ps))
-            return (msg, render_results(enriched), tp, tr, q, enriched)
-
-        search_btn.click(
-            on_search,
-            inputs=[query, lang, page, page_size],
-            outputs=[stats, gallery, hidden_total_pages, hidden_total_results, hidden_last_query, hidden_last_list]
-        )
-
-        async def go_prev(q, l, p, ps):
-            p = max(1, int(p) - 1)
-            msg, enriched, tp, tr = await do_search(q, l, p, int(ps))
-            return p, msg, render_results(enriched), tp, tr, enriched
-
-        async def go_next(q, l, p, ps, tp):
-            p = min(int(tp), int(p) + 1) if int(tp) > 0 else int(p) + 1
-            msg, enriched, ntp, tr = await do_search(q, l, p, int(ps))
-            return p, msg, render_results(enriched), ntp, tr, enriched
-
+        # Wiring: Search tab (no changes)
+        search_btn.click(on_search, inputs=[query, lang, page, page_size], outputs=[stats, gallery, hidden_total_pages, hidden_total_results, hidden_last_query, hidden_last_list])
         prev_btn.click(go_prev, [hidden_last_query, lang, page, page_size], [page, stats, gallery, hidden_total_pages, hidden_total_results, hidden_last_list])
         next_btn.click(go_next, [hidden_last_query, lang, page, page_size, hidden_total_pages], [page, stats, gallery, hidden_total_pages, hidden_total_results, hidden_last_list])
 
-        # ---------- Wiring: Discover tab
-        name_to_id = {name: gid for name, gid in genres_choices}
-
-        async def on_discover(gnames, l, p, ps):
-            g_ids = [name_to_id.get(n) for n in (gnames or []) if name_to_id.get(n) is not None]
-            msg, enriched, tp, tr = await do_discover(g_ids, l, int(p), int(ps))
-            return msg, render_results(enriched), tp, tr, gnames
-
+        # Wiring: Discover tab (no changes)
         discover_btn.click(on_discover, [genres, lang2, page2, page_size2], [stats2, gallery2, hidden_total_pages2, hidden_total_results2, hidden_last_genres])
-
-        async def go_prev2(gnames, l, p, ps):
-            p = max(1, int(p) - 1)
-            g_ids = [name_to_id.get(n) for n in (gnames or []) if name_to_id.get(n) is not None]
-            msg, enriched, tp, tr = await do_discover(g_ids, l, p, int(ps))
-            return p, msg, render_results(enriched), tp, tr
-
-        async def go_next2(gnames, l, p, ps, tp):
-            p = min(int(tp), int(p) + 1) if int(tp) > 0 else int(p) + 1
-            g_ids = [name_to_id.get(n) for n in (gnames or []) if name_to_id.get(n) is not None]
-            msg, enriched, ntp, tr = await do_discover(g_ids, l, p, int(ps))
-            return p, msg, render_results(enriched), ntp, tr
-
         prev_btn2.click(go_prev2, [hidden_last_genres, lang2, page2, page_size2], [page2, stats2, gallery2, hidden_total_pages2, hidden_total_results2])
         next_btn2.click(go_next2, [hidden_last_genres, lang2, page2, page_size2, hidden_total_pages2], [page2, stats2, gallery2, hidden_total_pages2, hidden_total_results2])
+
+        # NEW: Lifecycle event to populate genres on startup
+        demo.load(populate_genres_on_load, inputs=[lang2], outputs=[genres])
 
     return demo
