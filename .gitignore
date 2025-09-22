@@ -1,0 +1,66 @@
+# ---- OS / Editor ----
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.code-workspace
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+build/
+dist/
+*.egg-info/
+.eggs/
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.mypy_cache/
+.pytype/
+.cache/
+.tox/
+pytestdebug.log
+
+# ---- Virtual envs ----
+.venv/
+venv/
+env/
+ENV/
+pip-wheel-metadata/
+
+# ---- Notebooks ----
+.ipynb_checkpoints/
+
+# ---- Gradio / app artifacts ----
+gradio_cached_examples/
+gradio/  # old versions
+*.gradio
+
+# ---- Logs / runtime ----
+*.log
+logs/
+nohup.out
+
+# ---- Environment & secrets ----
+.env
+.env.*        # e.g., .env.local, .env.dev
+*.key
+*.pem
+*.p12
+*.crt
+*.der
+*.jks
+gcp-key.json
+*.credential*
+*.secrets.json
+
+# ---- Tools ----
+# macOS Finder tags & metadata are already covered by .DS_Store
+# If you later add Node-based tooling (not required now), uncomment:
+# node_modules/
+# package-lock.json
+# yarn.lock
